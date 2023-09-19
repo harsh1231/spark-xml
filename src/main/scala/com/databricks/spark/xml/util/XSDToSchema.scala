@@ -241,9 +241,17 @@ object XSDToSchema {
               case choice: XmlSchemaChoice =>
                 choice.getItems.asScala.map { e =>
                   val xme = e.asInstanceOf[XmlSchemaElement]
-                  val baseType = getStructField(xmlSchema, xme.getSchemaType).dataType
+                  val refQName = xme.getRef.getTargetQName
+                  val baseType = if (refQName != null) {
+                      getStructField(
+                        xmlSchema,
+                        xmlSchema.getParent.getElementByQName(refQName).getSchemaType).dataType
+                    }
+                    else getStructField(xmlSchema, xme.getSchemaType).dataType
                   val dataType = if (xme.getMaxOccurs > 1) ArrayType(baseType) else baseType
-                  StructField(xme.getName, dataType, true)
+                  val structFieldName =
+                    Option(refQName).map(_.getLocalPart).getOrElse(xme.getName)
+                  StructField(structFieldName, dataType, true)
                 }
               case e: XmlSchemaElement =>
                 val refQName = e.getRef.getTargetQName
