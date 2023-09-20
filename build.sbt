@@ -6,7 +6,7 @@ version := "0.17.0"
 
 organization := "com.databricks"
 
-scalaVersion := "2.13.8"
+scalaVersion := "2.12.15"
 
 crossScalaVersions := Seq("2.12.15", "2.13.8")
 
@@ -85,4 +85,27 @@ mimaPreviousArtifacts := Set("com.databricks" %% "spark-xml" % "0.16.0")
 
 mimaBinaryIssueFilters ++= {
   Seq()
+}
+
+val packageSources = taskKey[File]("Create a sources jar.")
+
+packageSources := {
+  val artifact = name.value + "-" + version.value
+  val srcs = (Compile / managedSources).value ++ (Compile / unmanagedSources).value
+  val jarFile = crossTarget.value / s"$artifact-sources.jar"
+
+  streams.value.log.info("Creating sources jar...")
+
+  // Create the jar file with the source files
+  IO.jar(Path.allSubpaths((Compile / sourceDirectory).value), jarFile, new java.util.jar.Manifest)
+
+  jarFile
+}
+
+val packageAll = taskKey[Unit]("Package both binary and sources jars.")
+
+packageAll := {
+  (Compile / packageBin).value
+  packageSources.value
+  ()
 }

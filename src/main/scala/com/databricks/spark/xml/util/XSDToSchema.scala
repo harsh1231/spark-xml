@@ -17,13 +17,13 @@ package com.databricks.spark.xml.util
 import java.io.{File, FileInputStream, InputStreamReader, StringReader}
 import java.nio.charset.StandardCharsets
 import java.nio.file.Path
-
 import scala.jdk.CollectionConverters._
 import org.apache.spark.sql.types._
 import org.apache.ws.commons.schema._
 import org.apache.ws.commons.schema.constants.Constants
-
 import com.databricks.spark.xml.XmlOptions
+
+import scala.collection.mutable.ArrayBuffer
 
 /**
  * Utility to generate a Spark schema from an XSD. Not all XSD schemas are simple tabular schemas,
@@ -78,6 +78,7 @@ object XSDToSchema {
   private def getStructField(xmlSchema: XmlSchema, schemaType: XmlSchemaType): StructField = {
     schemaType match {
       // xs:simpleType
+      case null => StructField("null", NullType)
       case simpleType: XmlSchemaSimpleType =>
         val schemaType = simpleType.getContent match {
           case restriction: XmlSchemaSimpleTypeRestriction =>
@@ -162,6 +163,12 @@ object XSDToSchema {
                 }
 
                 val extendedFields = getStructFieldsFromParticle(extension.getParticle, xmlSchema)
+                if (schemaType.getQName == null) {
+                  return StructField(
+                    "null_QName",
+                    StructType(baseFields ++ extendedFields)
+                  )
+                }
                 StructField(
                   schemaType.getQName.getLocalPart,
                   StructType(baseFields ++ extendedFields)
@@ -233,6 +240,8 @@ object XSDToSchema {
               val dataType = if (any.getMaxOccurs > 1) ArrayType(StringType) else StringType
               StructField(XmlOptions.DEFAULT_WILDCARD_COL_NAME, dataType, true)
           }.toSeq
+
+        case groupRef: XmlSchemaGroupRef => processGroupRef(groupRef, xmlSchema)
         // xs:sequence
         case sequence: XmlSchemaSequence =>
           // flatten xs:choice nodes
@@ -272,6 +281,7 @@ object XSDToSchema {
                   if (any.getMaxOccurs > 1) ArrayType(StringType) else StringType
                 val nullable = any.getMinOccurs == 0
                 Seq(StructField(XmlOptions.DEFAULT_WILDCARD_COL_NAME, dataType, nullable))
+              case groupRef: XmlSchemaGroupRef => processGroupRef(groupRef, xmlSchema)
               case unsupported =>
                 throw new IllegalArgumentException(s"Unsupported item: $unsupported")
             }
@@ -282,4 +292,19 @@ object XSDToSchema {
           throw new IllegalArgumentException(s"Unsupported particle: $unsupported")
       }
   }
+
+  def processGroupRef(groupRef: XmlSchemaGroupRef, xmlSchema: XmlSchema): Seq[StructField] = {
+    val group = Option(xmlSchema.getGroupByName(groupRef.getRefName))
+    val childFields = group.map(g =>
+      getStructFieldsFromParticle(g.getParticle, xmlSchema)).getOrElse(Seq.empty)
+
+    if (groupRef.getMaxOccurs > 1) {
+      val arrayFields = childFields.map(e =>
+        StructField(e.name, ArrayType(e.dataType), groupRef.getMinOccurs == 0, e.metadata))
+      arrayFields ++ childFields
+    } else {
+      childFields
+    }
+  }
+
 }
